@@ -6,7 +6,7 @@ from utils import loss_fn_kd, display_structure, loss_label_smoothing, display_s
 import numpy as np
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from imgnet_models.sampler import ImbalancedAccuracySampler
+#from imgnet_models.sampler import ImbalancedAccuracySampler
 import torch.nn as nn
 
 def set_grad(var):
@@ -135,12 +135,13 @@ def soft_train(train_loader, model, hyper_net, criterion, valid_loader, optimize
     # resource_loss = 0
     # hyper_loss = 0
 
-    model.train()
+    model.train() # why model.train() here, When you call model.train(), it tells PyTorch that the model is in training mode
     # sumres_loss = 0
     end = time.time()
     lmdValue = 0
 
     if epoch < int((args.epochs - 5)/ 2) + 5:
+        print(">>>>> Using newly generated mask")
         with torch.no_grad():
             hyper_net.eval()
             vector = hyper_net()  # a vector 
@@ -161,7 +162,7 @@ def soft_train(train_loader, model, hyper_net, criterion, valid_loader, optimize
         target = target.cuda(args.gpu, non_blocking=True)
 
         optimizer.zero_grad()
-        sel_loss, loss, outputs = one_step_net(input, target, model, masks, args)
+        sel_loss, loss, outputs = one_step_net(input, target, model, masks, args) # reg loss, normal loss between target and output, outputs
 
         optimizer.step()
 
@@ -200,8 +201,7 @@ def soft_train(train_loader, model, hyper_net, criterion, valid_loader, optimize
 
                 optimizer_hyper.zero_grad()
 
-                masks, h_loss, res_loss, hyper_outputs = one_step_hypernet(val_inputs, val_targets, model, hyper_net,
-                                                                           args)
+                masks, h_loss, res_loss, hyper_outputs = one_step_hypernet(val_inputs, val_targets, model, hyper_net, args)
                 optimizer_hyper.step()
 
                 h_acc1, h_acc5 = accuracy(hyper_outputs, val_targets, topk=(1, 5))
@@ -225,7 +225,7 @@ def soft_train(train_loader, model, hyper_net, criterion, valid_loader, optimize
     if epoch >= args.start_epoch:
         if epoch < int((args.epochs - 5)/ 2) + 5: 
             with torch.no_grad():
-                    # resource_constraint.print_current_FLOPs(hyper_net.resource_output())
+                # resource_constraint.print_current_FLOPs(hyper_net.resource_output())
                 hyper_net.eval()
                 vector = hyper_net()
                 display_structure(hyper_net.transfrom_output(vector))

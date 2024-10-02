@@ -1,3 +1,3 @@
 from .gate_function import *
 from .resnet_gate import *
-from .mobilentv2 import *
+from .mobilenetv2_custom import *

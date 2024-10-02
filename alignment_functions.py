@@ -44,7 +44,7 @@ class SelectionBasedRegularization(nn.Module):
             gl_loss = (w_up*(1-m_out)).pow(2).sum((1,2,3)).add(1e-8).pow(1/2.).sum() \
                       + (w_low*(1-m_in)).pow(2).sum((0,2,3)).add(1e-8).pow(1/2.).sum()
             gl_list.append(gl_loss)
-        sum_loss = self.lam * custom_grad_weight.apply(sum(gl_list)/len(gl_list), self.grad_mul)
+        sum_loss = self.lam * custom_grad_weight.apply(sum(gl_list)/len(gl_list), self.grad_mul) # self.lam  is lambda  group-specific regularization coefficient?
         return sum_loss
     # w_up, w_middle, w_low = weights[i]
     #             m_up, m_middle, m_low = masks[i]
@@ -57,17 +57,6 @@ class SelectionBasedRegularization(nn.Module):
         for i in range(len(weights)):
             w_up, w_middle, w_low = weights[i]
             m_out,mm_in, mm_out, m_in = masks[i]
-            # mm_in, mm_out,
-            # print(w_up.size())
-            # print(m_out.size())
-            #
-            # print(mm_in.size())
-            # print(w_middle.size())
-            # print(mm_out.size())
-            #
-            # print(m_in.size())
-            # print(w_low.size())
-
             gl_loss = (w_up     * (1 - m_out)).pow(2).sum((1,2,3)).add(1e-8).pow(1/2.).sum() 
             + (w_middle * (1 - mm_out)).pow(2).sum((1, 2, 3)).add(1e-8).pow(1 / 2.).sum() 
             # gl_loss = (w_up     * (1 - m_out)).pow(2).sum((1,2,3)).add(1e-8).pow(1/2.).sum() \

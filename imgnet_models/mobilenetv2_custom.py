@@ -10,7 +10,7 @@ import torch.nn as nn
 import math
 from .gate_function import virtual_gate
 
-__all__ = ['mobilenet_v2', 'my_mobilenet_v2']
+#__all__ = ['mobilenet_v2', 'my_mobilenet_v2']
 
 
 def _make_divisible(v, divisor, min_value=None):

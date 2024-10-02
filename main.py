@@ -110,7 +110,7 @@ parser.add_argument('--hyper_step', default=20, type=int)
 
 parser.add_argument('--grad_mul', default=10.0, type=float)
 parser.add_argument('--reg_w', default=4.0, type=float)  # 4.0 
-parser.add_argument('--gl_lam', default=0.0001, type=float)
+parser.add_argument('--gl_lam', default=0.0001, type=float, help='group lasso lamda (default: 0.0001)')
 parser.add_argument('--start_epoch_hyper', default=20, type=int)
 parser.add_argument('--start_epoch_gl', default=100, type=int)
 
@@ -136,8 +136,9 @@ def main():
     global best_acc1
 
     print("=> creating model '{}'".format(args.arch))
+    
+    print("args.state:", args.stage)
     if args.stage == 'train-gate':
-        print("None")
         if args.arch == 'resnet50':
             if args.gates == 2:
                 gate_string = '_2gates'
@@ -155,23 +156,26 @@ def main():
             args.model_name = 'resnet'
             args.block_string = model.block_string
 
-            print_model_param_flops(model) #
+            print_model_param_flops(model) # Number of FLOPs: 4.12283G
 
-            width, structure = model.count_structure()
+            width, structure = model.count_structure() # 32, [64, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128, 128, 128, 128, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 512, 512, 512, 512, 512, 512]
 
             hyper_net = HyperStructure(structure=structure, T=0.4, base=3,args=args)
             hyper_net.cuda()
             tmp = hyper_net()
-            print("Mask", tmp, tmp.size())
+            print("Mask and its size:", tmp, tmp.size()) # size:  torch.Size([7552])
+            input('check mask size')
+            import pdb; pdb.set_trace()
             # return
 
             args.structure = structure
-            sel_reg = SelectionBasedRegularization(args)
+            sel_reg = SelectionBasedRegularization(args) # Perform projection operator and update following Eq. (2) or Eq. (3) on ZIGs with w
 
-            if args.pruning_method == 'flops':
+            if args.pruning_method == 'flops': # default is flops
                 size_out, size_kernel, size_group, size_inchannel, size_outchannel = get_middle_Fsize_resnetbb(model)
                 resource_reg = Flops_constraint_resnet_bb(args.p, size_kernel, size_out, size_group, size_inchannel,
                                                        size_outchannel, w=args.reg_w, HN=True,structure=structure)
+                # eq(4) ?
         elif args.arch == 'resnet101':
             if args.gates == 2:
                 gate_string = '_2gates'
@@ -296,7 +300,7 @@ def main():
     criterion = nn.CrossEntropyLoss() #.cuda(args.gpu)
     if args.stage == 'train-gate':
         params_group = group_weight(hyper_net)
-        print(len(list(hyper_net.parameters())))
+        print("len(list(hyper_net.parameters())): ", len(list(hyper_net.parameters())))
 
         optimizer_hyper = torch.optim.AdamW(params_group, lr=1e-3, weight_decay=1e-2)
         scheduler_hyper = torch.optim.lr_scheduler.MultiStepLR(optimizer_hyper, milestones=[int(0.98 * ((args.epochs - 5) / 2) + 5)], gamma=0.1)
@@ -311,9 +315,9 @@ def main():
         opt_name = args.opt_name.lower()
         model.lmbda_amplify   = DEFAULT_OPT_PARAMS[opt_name]['lmbda_amplify']
         model.hat_lmbda_coeff = DEFAULT_OPT_PARAMS[opt_name]['hat_lmbda_coeff']
-        model.lmd = args.lmd
+        model.lmd = args.lmd # group lasso lamd (default: 10)
 
-        print("====== model.lmd", model.lmd)
+        print("====== model.lmd, group lasso lamd:", model.lmd)
 
         model.epsilon = args.epsilon
 
@@ -323,16 +327,17 @@ def main():
         elif opt_name == 'rmsprop':
             optimizer = torch.optim.RMSprop(params, lr=args.lr, momentum=args.momentum,
                                             weight_decay=args.weight_decay, eps=0.0316, alpha=0.9)
-        elif opt_name == 'adamw':
+        elif opt_name == 'adamw': # default 
             optimizer = torch.optim.AdamW(params, lr=args.lr,weight_decay=args.weight_decay)
 
         else:
             raise RuntimeError("Invalid optimizer {}. Only SGD and RMSprop are supported for gate training.".format(args.opt))
-        print(optimizer)
+        print('optimizer:', optimizer)
+        # torch.optim.lr_scheduler.CosineAnnealingLR is learning rate scheduler provided by PyTorch that adjusts the learning rate following a cosine annealing schedule
         if args.cos_anneal:
             # base_sch = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, int(args.epochs - 5))
             base_sch = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, int((args.epochs - 5)/ 2)) # int((args.epochs - 5)/ 2) + 1) # int((240 - 5) / 2)
-        else:
+        else: # default
             base_sch = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, int(args.epochs - 5))
 
         print("optimizer scheduler >>>", base_sch)
@@ -473,9 +478,9 @@ def main():
             print("current_lr %.4f"%param_group["lr"])
             model.lr = param_group["lr"]
 
-#         # train for one epoch
-        if args.stage == 'train-gate':
-            cur_maskVec = soft_train(train_loader, model, hyper_net, criterion, val_loader_gate, optimizer, optimizer_hyper, epoch, cur_maskVec, args)
+        # train for one epoch
+        if args.stage == 'train-gate': # training start from here? train the main renset model and hypernet(controller network) at the same time?
+            cur_maskVec = soft_train(train_loader, model, hyper_net, criterion, val_loader_gate, optimizer, optimizer_hyper, epoch, cur_maskVec, args) # 'epoch' of outter for is passed into soft_train
             scheduler.step()
             scheduler_hyper.step()
 
@@ -483,9 +488,8 @@ def main():
             simple_train(train_loader, model, criterion, optimizer, epoch, args)
             scheduler.step()
 
-#         # evaluate on validation set
+        # print evaluate on validation set
         if args.stage == 'train-gate':
-            print("None")
             if (epoch+1)%10 == 0:
                 if epoch >= args.start_epoch_gl:
                     acc1 = validateMask(val_loader, model, copy.deepcopy(cur_maskVec), criterion, args)

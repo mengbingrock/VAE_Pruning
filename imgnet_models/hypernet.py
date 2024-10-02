@@ -79,6 +79,9 @@ class custom_grad_weight(torch.autograd.Function):
 
 
 class HyperStructure(nn.Module):
+    '''
+    Controller Network  incorporates bi-directional gated recurrent units (GRU) [9] fol- lowed by linear layers and Gumbel-Sigmoid [27] combined with straight-through estimator (STE)
+    '''
     def __init__(self, structure=None, T=0.4, base=3, args=None):
         super(HyperStructure, self).__init__()
         #self.fc1 = nn.Linear(64, 256, bias=False)
@@ -86,14 +89,16 @@ class HyperStructure(nn.Module):
 
         self.T = T
         #self.inputs = 0.5*torch.ones(1,64)
-        self.structure = structure
-        self.Bi_GRU = nn.GRU(64, 128,bidirectional=True) # input dim * output dim
+        self.structure = structure # structure is the resnet structure
+        # [64, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128, 128, 128, 128, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 512, 512, 512, 512, 512, 512]
+        
+        self.Bi_GRU = nn.GRU(64, 128, bidirectional=True) # input dim * output dim, input_size=10, hidden_size=20, num_layers=2
 
         self.h0 = torch.zeros(2,1,128) # bidirect * batch * output dim
         self.inputs = nn.Parameter(torch.Tensor(len(structure),1, 64)) # sequence len (structure len) * batch * input dim
         nn.init.orthogonal_(self.inputs)
         self.inputs.requires_grad=False
-        print("structure", structure)
+        print("HyperStructure init: structure", structure)
 
         # if wn_flag:
         #     self.linear_list = [weight_norm(Linear_GW(256, structure[i], bias=False, sparsity=self.sparsity[i])) for i in range(len(structure))]
@@ -110,16 +115,17 @@ class HyperStructure(nn.Module):
             self.block_string = args.block_string
         if hasattr(args, 'se_list'):
             self.se_list = args.se_list
+
     def forward(self):
         if self.bn1.weight.is_cuda:
             self.inputs = self.inputs.cuda()
-            self.h0 = self.h0.cuda()
-        outputs, hn = self.Bi_GRU(self.inputs, self.h0)
+            self.h0 = self.h0.cuda()  # h0 has shape: 2,1,128  bidirect, batch, output dim
+        outputs, hn = self.Bi_GRU(self.inputs, self.h0) # inputs shape: 30 = len(structure), 1, 64, h0 shape: 2,1,128  outputs shape: 30, 1, 128?
         outputs = [F.relu(self.bn1(outputs[i,:])) for i in  range(len(self.structure))]
         outputs = [self.mh_fc[i](outputs[i]) for i in range(len(self.mh_fc))]
 
         out = torch.cat(outputs, dim=1) # sum channel size
-        out = gumbel_softmax_sample(out, T=self.T, offset=self.base)
+        out = gumbel_softmax_sample(out, T=self.T, offset=self.base) #  Gumbel-Sigmoid aims to produce a binary vector w, that approximates a binomial distribution
         if not self.training:
             out = hard_concrete(out) # =》 0 or 1
         # if self.training:

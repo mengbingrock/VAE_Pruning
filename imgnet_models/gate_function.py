@@ -156,9 +156,15 @@ class AC_layer(nn.Module):
 
 class custom_STE(torch.autograd.Function):
     """
+    Straight-Through Estimator (STE)
     We can implement our own custom autograd Functions by subclassing
     torch.autograd.Function and implementing the forward and backward passes
     which operate on Tensors.
+    The Straight-Through Estimator (STE) is a technique used in the context of deep learning 
+    to enable backpropagation through non-differentiable functions, often found in tasks like quantization,
+    binarization, or other discrete operations. It provides a workaround for gradient computation 
+    in scenarios where a function is either non-differentiable or has zero gradients, which makes 
+    standard gradient-based optimization methods like backpropagation inapplicable.
     """
 
     @staticmethod

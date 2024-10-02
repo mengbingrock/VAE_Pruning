@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from .imgnet_utils import load_state_dict_from_url
+from torch.hub import load_state_dict_from_url
 from .gate_function import soft_gate, custom_STE
 from .gate_function import virtual_gate
 
@@ -180,11 +180,11 @@ class ResNet(nn.Module):
 
 
         if block is Bottleneck:
-            print('Bottleneck')
+            print('Resnet init: block is Bottleneck')
             self.factor = 2
             self.block_string = 'Bottleneck'
         elif block is BasicBlock:
-            print('BasicBlock')
+            print('Resnet Init: block is BasicBlock')
             self.factor = 1
             self.block_string = 'BasicBlock'
 
@@ -387,6 +387,7 @@ class ResNet(nn.Module):
                 m_out = (masks[vg_idx] == 0)
                 vg_idx += 1
                 ## calculate group norm
+                # w_norm which is [z]g in equation (2)
                 w_norm = (modules[layer_id - gap].weight.data[m_out]).pow(2).sum((1,2,3))
                 # print("w_norm shape", w_norm.size(), modules[layer_id - gap].weight.data[m_out].size())
                 w_norm += (modules[layer_id - gap + 1].weight.data[m_out]).pow(2) #.sum((1,2,3))

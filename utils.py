@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.utils.data.sampler import SubsetRandomSampler
 from imgnet_models.gate_function import custom_STE
 from imgnet_models.gate_function import virtual_gate
-from imgnet_models.mobilenetv3 import Hswish, Hsigmoid
+#from imgnet_models.mobilenetv3 import Hswish, Hsigmoid
 
 import torchvision
 from math import floor
@@ -124,7 +124,7 @@ class Flops_constraint(nn.Module):
             #print(i)
 
             current_tensor = custom_STE.apply(input[i], False)
-            if i >0:
+            if i > 0:
                 c_in = custom_STE.apply(input[i-1], False).sum()
             c_out = current_tensor.sum()
             #sum_flops+=current_tensor.sum()
@@ -284,7 +284,7 @@ class Flops_constraint_resnet_bb(nn.Module):
         resource_ratio = (sum_flops / self.t_flops)
         # abs_rv = torch.clamp(resource_ratio, min=self.p) ### 现在有大的变小，之后补充小的
         # loss = torch.log((abs_rv / (self.p))+1e-8)
-        if resource_ratio > self.p:
+        if resource_ratio > self.p: # p ∈ (0, 1] is a hyperparameter to decide the target fraction of FLOPs, 
             abs_rv = torch.clamp(resource_ratio, min=self.p + 0.005)
             loss = torch.log((abs_rv / (self.p)))
         else:
@@ -1038,10 +1038,12 @@ def print_model_param_flops(model=None, input_res=224, multiply_adds=False):
 
             if isinstance(net, torch.nn.Upsample):
                 net.register_forward_hook(upsample_hook)
+            '''
             if isinstance(net, Hswish):
                 net.register_forward_hook(hswish_hook)
             if isinstance(net, Hsigmoid):
                 net.register_forward_hook(hsigmoid_hook)
+            '''
             return
         for c in childrens:
             foo(c)
@@ -1261,8 +1263,7 @@ def get_middle_Fsize_mobnetv3(model, input_res=224):
         truncate_module = []
         for layer_id in range(len(modules)):
             m0 = modules[layer_id]
-            if isinstance(m0, nn.BatchNorm2d) or isinstance(m0, nn.Conv2d) or isinstance(m0, nn.Linear) or isinstance(m0, nn.ReLU) or \
-                    isinstance(m0, nn.ReLU6) or isinstance(m0, virtual_gate) or isinstance(m0, Hswish):
+            if isinstance(m0, nn.BatchNorm2d) or isinstance(m0, nn.Conv2d) or isinstance(m0, nn.Linear) or isinstance(m0, nn.ReLU) or isinstance(m0, nn.ReLU6) or isinstance(m0, virtual_gate):
                 truncate_module.append(m0)
 
         for layer_id in range(len(truncate_module)):
@@ -1273,9 +1274,12 @@ def get_middle_Fsize_mobnetv3(model, input_res=224):
 
             if isinstance(m, virtual_gate) and layer_id+4<len(truncate_module)-1:
                 #print(m)
+                #if isinstance(truncate_module[layer_id - 1], Hswish):
+                '''
                 if isinstance(truncate_module[layer_id - 1], Hswish):
-                    all_dict['hswish_list'].append(True)
-                elif isinstance(truncate_module[layer_id - 1], nn.ReLU):
+                   all_dict['hswish_list'].append(True)
+                '''
+                if isinstance(truncate_module[layer_id - 1], nn.ReLU):
                     all_dict['hswish_list'].append(False)
 
 
