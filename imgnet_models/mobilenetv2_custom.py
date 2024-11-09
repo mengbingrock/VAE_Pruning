@@ -243,7 +243,7 @@ class MobileNetV2(nn.Module):
         self.structure = structure
         return sum(structure), structure
 
-    def set_vritual_gate(self, arch_vector):
+    def set_virtual_gate(self, arch_vector):
         i = 0
         start = 0
         for m in self.modules():

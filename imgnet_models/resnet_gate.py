@@ -87,6 +87,7 @@ class Bottleneck(nn.Module):
                  base_width=64, dilation=1, norm_layer=None, cfg=None, num_gate=2):
         super(Bottleneck, self).__init__()
         if cfg is None:
+            print("Bottleneck cfg is None")
             if norm_layer is None:
                 norm_layer = nn.BatchNorm2d
             width = int(planes * (base_width / 64.)) * groups
@@ -110,6 +111,7 @@ class Bottleneck(nn.Module):
             self.downsample = downsample
             self.stride = stride
         else:
+            print("Bottleneck cfg is not None:", cfg)
             if norm_layer is None:
                 norm_layer = nn.BatchNorm2d
             #width = int(planes * (base_width / 64.)) * groups
@@ -179,11 +181,11 @@ class ResNet(nn.Module):
         self.lr = 0 
 
 
-        if block is Bottleneck:
+        if block is Bottleneck: # Bottleneck.expansion = 4
             print('Resnet init: block is Bottleneck')
             self.factor = 2
             self.block_string = 'Bottleneck'
-        elif block is BasicBlock:
+        elif block is BasicBlock: # BasicBlock.expansion = 1
             print('Resnet Init: block is BasicBlock')
             self.factor = 1
             self.block_string = 'BasicBlock'
@@ -213,15 +215,17 @@ class ResNet(nn.Module):
 
         print(self.factor)
         if cfg == None:
+            print("cfg is None")
 
-            self.layer1 = self._make_layer(block, 64, layers[0])
+            self.layer1 = self._make_layer(block, 64, layers[0]) # layers[0] = 3
             self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
-                                           dilate=replace_stride_with_dilation[0])
+                                           dilate=replace_stride_with_dilation[0]) # layers[1] = 4
             self.layer3 = self._make_layer(block, 256, layers[2], stride=2,
-                                           dilate=replace_stride_with_dilation[1])
+                                           dilate=replace_stride_with_dilation[1]) # layers[2] = 6
             self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
-                                           dilate=replace_stride_with_dilation[2])
+                                           dilate=replace_stride_with_dilation[2]) # layers[3] = 3
         else:
+            print("cfg is not None:", cfg)
 
             start = 0
             end = int(self.factor*layers[0])
@@ -267,6 +271,7 @@ class ResNet(nn.Module):
         if dilate:
             self.dilation *= stride
             stride = 1
+                            # 64             
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
                 conv1x1(self.inplanes, planes * block.expansion, stride),
@@ -325,7 +330,7 @@ class ResNet(nn.Module):
 
         return sum(structure), structure
 
-    def set_vritual_gate(self, arch_vector):
+    def set_virtual_gate(self, arch_vector):
         i = 0
         start = 0
         for m in self.modules():
@@ -486,7 +491,7 @@ class ResNet(nn.Module):
 
                 vg_idx += 1
 
-
+    # only called in oto
     def half_space_project(self, hat_x, x, epsilon, upper_group_sparsity = 1):
         num_groups = x.shape[0]
         x_norm = torch.norm(x, p=2, dim=1)
@@ -565,6 +570,7 @@ class ResNet(nn.Module):
 
 
 def _resnet(arch, block, layers, pretrained, progress, **kwargs):
+                        # [3,4,6,3]
     model = ResNet(block, layers, **kwargs)
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch],

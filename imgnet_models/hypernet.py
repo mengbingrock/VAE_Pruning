@@ -15,10 +15,10 @@ def sample_gumbel(shape, eps=1e-20):
     return -torch.log(-torch.log(U + eps) + eps)
 
 
-def gumbel_softmax_sample(logits, T, offset=0):
+def gumbel_softmax_sample(logits, T, offset=0, device = 'cuda'):
     gumbel_sample = sample_gumbel(logits.size())
     if logits.is_cuda:
-        gumbel_sample = gumbel_sample.cuda()
+        gumbel_sample = gumbel_sample.cuda(device)
 
     y = logits + gumbel_sample + offset
     return torch.sigmoid(y / T)
@@ -32,11 +32,11 @@ def gumbel_softmax_sample(logits, T, offset=0):
 #     RB = RelaxedBernoulli(T, logits=logits)
 #     return RB.sample()
 
-def hard_concrete(out):
+def hard_concrete(out, device):
     out_hard = torch.zeros(out.size())
     out_hard[out>=0.5]=1
     if out.is_cuda:
-        out_hard = out_hard.cuda()
+        out_hard = out_hard.cuda(device)
     # Set gradients w.r.t. y_hard gradients w.r.t. y
     out_hard = (out_hard - out).detach() + out
     return out_hard
@@ -73,7 +73,7 @@ class custom_grad_weight(torch.autograd.Function):
         gw = ctx.grad_w
         # print(gw)
         if grad_input.is_cuda and type(gw) is not int:
-            gw = gw.cuda()
+            gw = gw.cuda(grad_input.device)
 
         return grad_input * gw, None, None
 
@@ -84,6 +84,7 @@ class HyperStructure(nn.Module):
     '''
     def __init__(self, structure=None, T=0.4, base=3, args=None):
         super(HyperStructure, self).__init__()
+        self.device = args.gpu
         #self.fc1 = nn.Linear(64, 256, bias=False)
         self.bn1 = nn.LayerNorm([256]) # Layer
 
@@ -118,16 +119,17 @@ class HyperStructure(nn.Module):
 
     def forward(self):
         if self.bn1.weight.is_cuda:
-            self.inputs = self.inputs.cuda()
-            self.h0 = self.h0.cuda()  # h0 has shape: 2,1,128  bidirect, batch, output dim
+            pass
+            self.inputs = self.inputs.cuda(self.device) # error
+            self.h0 = self.h0.cuda(self.device)  # h0 has shape: 2,1,128  bidirect, batch, output dim
         outputs, hn = self.Bi_GRU(self.inputs, self.h0) # inputs shape: 30 = len(structure), 1, 64, h0 shape: 2,1,128  outputs shape: 30, 1, 128?
         outputs = [F.relu(self.bn1(outputs[i,:])) for i in  range(len(self.structure))]
         outputs = [self.mh_fc[i](outputs[i]) for i in range(len(self.mh_fc))]
 
         out = torch.cat(outputs, dim=1) # sum channel size
-        out = gumbel_softmax_sample(out, T=self.T, offset=self.base) #  Gumbel-Sigmoid aims to produce a binary vector w, that approximates a binomial distribution
+        out = gumbel_softmax_sample(out, T=self.T, offset=self.base, device=self.device) #  Gumbel-Sigmoid aims to produce a binary vector w, that approximates a binomial distribution
         if not self.training:
-            out = hard_concrete(out) # =》 0 or 1
+            out = hard_concrete(out, device=self.device) # =》 0 or 1
         # if self.training:
         #     self.update_bias()
 
@@ -145,15 +147,15 @@ class HyperStructure(nn.Module):
 
     def resource_output(self):
         if self.bn1.weight.is_cuda:
-            self.inputs = self.inputs.cuda()
-            self.h0 = self.h0.cuda()
+            self.inputs = self.inputs.cuda(self.device)
+            self.h0 = self.h0.cuda(self.device)
         outputs, hn = self.Bi_GRU(self.inputs, self.h0)
         outputs = [F.relu(self.bn1(outputs[i, :])) for i in range(len(self.structure))]
         outputs = [self.mh_fc[i](outputs[i]) for i in range(len(self.mh_fc))]
 
         out = torch.cat(outputs, dim=1)
         out = gumbel_softmax_sample(out, T=self.T, offset=self.base)
-        out = hard_concrete(out)
+        out = hard_concrete(out, self.device)
 
         return out.squeeze()
 
@@ -167,6 +169,23 @@ class HyperStructure(nn.Module):
             return self.vector2mask_mobnetv2(inputs)
         elif self.model_name == 'mobnetv3':
             return self.vector2mask_mobnetv3(inputs)
+        elif self.model_name == 'vae':
+            print("vector2mask_vae called")
+            return self.vector2mask_vae(inputs)
+        
+    def vector2mask_vae(self, inputs):
+        vector = self.transfrom_output(inputs)
+        mask_list = []
+        for i in range(len(vector)):
+            item_list = []
+            mask_output = vector[i].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            mask_input = vector[i].unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+
+            item_list.append(mask_output)
+            item_list.append(mask_input)
+
+            mask_list.append(item_list)
+        return mask_list
 
     def vector2mask_resnet(self, inputs):
         vector = self.transfrom_output(inputs) # input => a serial of 0 / 1 value for each channel 

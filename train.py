@@ -21,8 +21,7 @@ def simple_train(train_loader, model, criterion, optimizer, epoch, args):
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
-    progress = ProgressMeter(len(train_loader), batch_time, data_time, losses, top1,
-                             top5, prefix="Epoch: [{}]".format(epoch))
+    progress = ProgressMeter(len(train_loader), batch_time, data_time, losses, top1, top5, prefix="Epoch: [{}]".format(epoch))
 
     model.train()
 
@@ -72,9 +71,9 @@ def one_step_hypernet(inputs, targets, net, hyper_net, args):
 
     vector = hyper_net() # 有分数
     if hasattr(net,'module'):
-        net.module.set_vritual_gate(vector)
+        net.module.set_virtual_gate(vector)
     else:
-        net.set_vritual_gate(vector)
+        net.set_virtual_gate(vector)
 
     outputs = net(inputs)
 
@@ -98,9 +97,18 @@ def one_step_net(inputs, targets, net, masks, args):
 
     net.train()
     sel_loss = torch.tensor(0)
-    outputs = net(inputs)
 
-    loss = cross_entropy_onehot_target(outputs, targets)
+    
+    if net.block_string != 'vae':
+        outputs = net(inputs)
+
+        
+        import pdb; pdb.set_trace()
+
+        loss = cross_entropy_onehot_target(outputs, targets)
+    else:
+        # vae outputs: loss,(outputs,z,mean,std)
+        loss, (outputs,z,mean,std) = net(inputs)
 
 
     # if hasattr(args, 'reg_align') and args.reg_align:
@@ -108,10 +116,14 @@ def one_step_net(inputs, targets, net, masks, args):
         weights = net.module.get_weights()
     else:
         weights = net.get_weights()
+    
+    #import pdb; pdb.set_trace()
+    #print("check weights")
+    # len(weights) = 16, number of virtual gates in net for resnet34
 
     ##### Group lasso remove --- Optional 
     with torch.no_grad():
-        sel_loss = args.selection_reg(weights, masks)
+        sel_loss = args.selection_reg(weights, masks) # group lasso for vae
     # loss = sel_loss
 
     loss.backward()
@@ -130,8 +142,7 @@ def soft_train(train_loader, model, hyper_net, criterion, valid_loader, optimize
     top5 = AverageMeter('Acc@5', ':6.2f')
     h_top1 = AverageMeter('HAcc@1', ':6.2f')
     h_top5 = AverageMeter('HAcc@5', ':6.2f')
-    progress = ProgressMeter(len(train_loader), batch_time, data_time, losses, alignments, top1,
-                             top5, hyper_losses, res_losses, h_top1, h_top5, prefix="Epoch: [{}]".format(epoch))
+    progress = ProgressMeter(len(train_loader), batch_time, data_time, losses, alignments, top1, top5, hyper_losses, res_losses, h_top1, h_top5, prefix="Epoch: [{}]".format(epoch))
     # resource_loss = 0
     # hyper_loss = 0
 
@@ -184,14 +195,17 @@ def soft_train(train_loader, model, hyper_net, criterion, valid_loader, optimize
                         model.project_wegit(hyper_net.transfrom_output(vector), lmdValue, model.lr)
                 elif args.project == 'oto':
                     model.oto(hyper_net.transfrom_output(vector))
+        if model.block_string != 'vae':
+            acc1, acc5 = accuracy(outputs, target, topk=(1, 5))
+            losses.update(loss.item(), input.size(0))
+            alignments.update(sel_loss.item(), input.size(0))
+            top1.update(acc1[0], input.size(0))
+            top5.update(acc5[0], input.size(0))
+        else: # vae
+            losses.update(loss.item(), input.size(0))
+            alignments.update(sel_loss.item(), input.size(0))
 
-        acc1, acc5 = accuracy(outputs, target, topk=(1, 5))
-        losses.update(loss.item(), input.size(0))
-        alignments.update(sel_loss.item(), input.size(0))
-        top1.update(acc1[0], input.size(0))
-        top5.update(acc5[0], input.size(0))
-
-        # if epoch >= args.start_epoch_hyper:
+        # if epoch >= args.start_epoch_hyper: default 25
         if epoch >= args.start_epoch_hyper and (epoch < int((args.epochs - 5)/ 2) + 5):
             if (i + 1) % args.hyper_step == 0:
                 val_inputs, val_targets = next(iter(valid_loader))
@@ -222,7 +236,7 @@ def soft_train(train_loader, model, hyper_net, criterion, valid_loader, optimize
 
 
     print("Project Lmd in this Epoch:", lmdValue)
-    if epoch >= args.start_epoch:
+    if epoch >= args.start_epoch: # default 0
         if epoch < int((args.epochs - 5)/ 2) + 5: 
             with torch.no_grad():
                 # resource_constraint.print_current_FLOPs(hyper_net.resource_output())
@@ -330,9 +344,9 @@ def validateMask(val_loader, model, cur_maskVec, criterion, args):
                              prefix='Test: ')
 
     if hasattr(model,'module'):
-        model.module.set_vritual_gate(vector)
+        model.module.set_virtual_gate(vector)
     else:
-        model.set_vritual_gate(vector)
+        model.set_virtual_gate(vector)
 
     model.eval()
 

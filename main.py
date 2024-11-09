@@ -18,6 +18,7 @@ import torchvision.datasets as datasets
 import torchvision.models as models
 from imgnet_models.resnet_gate import my_resnet50, my_resnet101, my_resnet34
 from imgnet_models.mobilenetv2_custom import my_mobilenet_v2
+from imgnet_models.vae import VAE
 from imgnet_models.hypernet import HyperStructure
 from Warmup_Sch import GradualWarmupScheduler
 from alignment_functions import SelectionBasedRegularization, SelectionBasedRegularization_MobileNet, SelectionBasedRegularization_MobileNetV3
@@ -118,6 +119,7 @@ parser.add_argument('--lr-step-size', default=30, type=int, help='decrease lr ev
 parser.add_argument('--lr-gamma', default=0.1, type=float, help='decrease lr by a factor of lr-gamma')
 parser.add_argument('--auto-augment', default=None, help='auto augment policy (default: None)')
 parser.add_argument('--random-erase', default=0.0, type=float, help='random erasing probability (default: 0.0)')
+parser.add_argument('--vae', default=False, type=bool,help='vae model')
 
 #/data/ILSVRC2012
 best_acc1 = 0
@@ -153,15 +155,18 @@ def main():
             else:
                 print(">>>>>>>>> NO Pretrained Model <<<<<<<<<<<<<")
                 model = my_resnet50()
+                
+            print(model)
+            print("ResNet50 model structure")
             args.model_name = 'resnet'
             args.block_string = model.block_string
 
             print_model_param_flops(model) # Number of FLOPs: 4.12283G
-
+                                                               #[64] * 6 . [128] * 8 . [256] * 12 . [512] * 6  virtual_gate number
             width, structure = model.count_structure() # 32, [64, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128, 128, 128, 128, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 512, 512, 512, 512, 512, 512]
 
-            hyper_net = HyperStructure(structure=structure, T=0.4, base=3,args=args)
-            hyper_net.cuda()
+            hyper_net = HyperStructure(structure=structure, T=0.4, base=3,args=args) # do we need to change HyperStructure? self.Bi_GRU = nn.GRU(64, 128, bidirectional=True)
+            hyper_net.cuda(args.gpu)
             tmp = hyper_net()
             print("Mask and its size:", tmp, tmp.size()) # size:  torch.Size([7552])
             input('check mask size')
@@ -176,6 +181,50 @@ def main():
                 resource_reg = Flops_constraint_resnet_bb(args.p, size_kernel, size_out, size_group, size_inchannel,
                                                        size_outchannel, w=args.reg_w, HN=True,structure=structure)
                 # eq(4) ?
+        elif args.arch == 'vae':
+            model = VAE()
+            
+            # get the model structure
+            
+            # init the HyperStructure with the model structure
+            
+            # init the regularizer
+            
+            # init the  sel_reg(apply to net) and resource_reg(apply to hypernet)
+
+            if args.pretrained:
+                print(">>>>>>>>> Using Pretrained Model <<<<<<<<<<<<<")
+                model = VAE(pretrained=True)
+            else:
+                print(">>>>>>>>> NO Pretrained Model <<<<<<<<<<<<<")
+                model = VAE()
+                
+            print(model)
+            print("VAE model structure")
+            args.model_name = 'vae'
+            args.block_string = model.block_string
+
+            import pdb; pdb.set_trace()
+            print_model_param_flops(model, input_res = 128) # Number of FLOPs, vae has input_res = 128
+            width, structure = model.count_structure() # 
+
+            hyper_net = HyperStructure(structure=structure, T=0.4, base=3,args=args) # do we need to change HyperStructure? self.Bi_GRU = nn.GRU(64, 128, bidirectional=True)
+            print('device:', args.gpu) # device: 7
+            hyper_net.cuda(args.gpu)
+            tmp = hyper_net()
+            print("Mask and its size:", tmp, tmp.size()) # size:  torch.Size([7552])
+            
+            
+            
+
+            args.structure = structure
+            sel_reg = SelectionBasedRegularization(args) # Perform projection operator and update following Eq. (2) or Eq. (3) on ZIGs with w
+
+            if args.pruning_method == 'flops': # default is flops
+                # size_out, size_kernel, size_group, size_inchannel, size_outchannel = get_middle_Fsize_vae(model)
+                resource_reg =  Channel_constraint(args.p) # use channel constraint for vae 
+            
+            
         elif args.arch == 'resnet101':
             if args.gates == 2:
                 gate_string = '_2gates'
@@ -218,7 +267,7 @@ def main():
             width, structure = model.count_structure()
             
             hyper_net = HyperStructure(structure=structure, T=0.4, base=3,args=args)
-            hyper_net.cuda()
+            hyper_net.cuda(args.gpu)
 
             args.structure = structure
             sel_reg = SelectionBasedRegularization(args)
@@ -299,7 +348,7 @@ def main():
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss() #.cuda(args.gpu)
     if args.stage == 'train-gate':
-        params_group = group_weight(hyper_net)
+        params_group = group_weight(hyper_net) 
         print("len(list(hyper_net.parameters())): ", len(list(hyper_net.parameters())))
 
         optimizer_hyper = torch.optim.AdamW(params_group, lr=1e-3, weight_decay=1e-2)
@@ -307,15 +356,15 @@ def main():
 
 
         if args.bn_decay:
-            print('bn not decay')
+            print('bn decay')
             params = group_weight(model)
         else:
-            print('bn decay')
+            print('bn no decay')
             params = model.parameters()
-        opt_name = args.opt_name.lower()
-        model.lmbda_amplify   = DEFAULT_OPT_PARAMS[opt_name]['lmbda_amplify']
-        model.hat_lmbda_coeff = DEFAULT_OPT_PARAMS[opt_name]['hat_lmbda_coeff']
-        model.lmd = args.lmd # group lasso lamd (default: 10)
+        opt_name = args.opt_name.lower() # 'adamw'
+        model.lmbda_amplify   = DEFAULT_OPT_PARAMS[opt_name]['lmbda_amplify'] # 20
+        model.hat_lmbda_coeff = DEFAULT_OPT_PARAMS[opt_name]['hat_lmbda_coeff'] # 1000.0
+        model.lmd = args.lmd # group lasso lamd (default: 10) # 0.0
 
         print("====== model.lmd, group lasso lamd:", model.lmd)
 
@@ -343,7 +392,7 @@ def main():
         print("optimizer scheduler >>>", base_sch)
 
         scheduler = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=5, after_scheduler=base_sch)
-        print(base_sch)
+        print("base_sch:", base_sch)
     else:
         if args.bn_decay:
             print('bn not decay')
@@ -402,6 +451,14 @@ def main():
                         transforms.ToTensor(),
                         normalize,
                     ]))
+        elif args.vae:
+            train_dataset = datasets.ImageFolder(
+                    traindir,
+                    transforms.Compose([
+                        transforms.Resize((128, 128)),
+                        transforms.ToTensor(),
+                        normalize,
+                    ]))
 
         else:
             train_dataset = datasets.ImageFolder(
@@ -427,17 +484,26 @@ def main():
                 transforms.ToTensor(),
                 normalize,
             ]))
-    val_dataset = datasets.ImageFolder(
-        valdir,
-        transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ]))
+    if not args.vae:
+        val_dataset = datasets.ImageFolder(
+            valdir,
+            transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                normalize,
+            ]))
+    else: # vae
+        val_dataset = datasets.ImageFolder(
+            valdir,
+            transforms.Compose([
+                        transforms.Resize((128, 128)),
+                        transforms.ToTensor(),
+                        normalize,
+            ])) 
 
-    print("train_dataset", train_dataset)
-    print("val_dataset", val_dataset)
+    print("train_dataset:\n", train_dataset)
+    print("val_dataset:\n", val_dataset)
 
     train_loader = MultiEpochsDataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
@@ -472,7 +538,7 @@ def main():
     print_flops(hyper_net, args)
     cur_maskVec = None
     # print('Cutmix: %s'%(args.cutmix))
-    for epoch in range(args.start_epoch, args.epochs):
+    for epoch in range(args.start_epoch, args.epochs): # default 0, 245
         #if args.stage != 'train-gate':
         for param_group in optimizer.param_groups:
             print("current_lr %.4f"%param_group["lr"])
@@ -491,7 +557,7 @@ def main():
         # print evaluate on validation set
         if args.stage == 'train-gate':
             if (epoch+1)%10 == 0:
-                if epoch >= args.start_epoch_gl:
+                if epoch >= args.start_epoch_gl: # 50
                     acc1 = validateMask(val_loader, model, copy.deepcopy(cur_maskVec), criterion, args)
                 else:
                     acc1 = validate(val_loader, model, criterion, args)
@@ -507,9 +573,12 @@ def main():
                 print_flops(hyper_net, args)
 
             elif epoch == 0:
-                acc1 = validate(val_loader, model, criterion, args)
+                if args.vae:
+                    print("skip validation for vae")
+                else:
+                    acc1 = validate(val_loader, model, criterion, args)
                     
-                print_flops(hyper_net, args)
+                    print_flops(hyper_net, args)
 
             if hasattr(model, 'module'):
                 model.module.reset_gates()

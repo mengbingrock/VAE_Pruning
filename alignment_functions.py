@@ -35,6 +35,8 @@ class SelectionBasedRegularization(nn.Module):
             return self.basic_forward(weights, masks)
         elif self.block_string == 'Bottleneck':
             return self.bb_forward(weights, masks)
+        elif self.block_string == 'vae':
+            return self.basic_forward(weights, masks)
 
     def basic_forward(self, weights, masks):
         gl_list = []

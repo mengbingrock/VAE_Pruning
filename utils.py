@@ -22,9 +22,9 @@ def print_flops(hyper_net, args):
 
     # vector = hyper_net() # 有分数
     # if hasattr(net,'module'):
-    #     net.module.set_vritual_gate(vector)
+    #     net.module.set_virtual_gate(vector)
     # else:
-    #     net.set_vritual_gate(vector)
+    #     net.set_virtual_gate(vector)
 
 
 
@@ -193,10 +193,10 @@ class Flops_constraint_resnet(nn.Module):
         resource_ratio = (sum_flops / self.t_flops)
         if resource_ratio > self.p:
             abs_rv = torch.clamp(resource_ratio, min=self.p + 0.005)
-            loss = torch.log((abs_rv / (self.p)))
+            loss = torch.log((abs_rv / (self.p))) # 分子始终大于分母
         else:
             abs_rv = torch.clamp(resource_ratio, max=self.p - 0.005)
-            loss = torch.log(((self.p) / abs_rv))
+            loss = torch.log(((self.p) / abs_rv)) # # 分子始终大于分母
 
         #loss = torch.abs(sum_flops/self.t_flops - (self.p))**2
         return self.weight*loss
@@ -323,6 +323,11 @@ class Channel_constraint(nn.Module):
 
         loss = torch.log(torch.abs(cat_tensor.sum() / overall_length - (self.p)) + 1)
         return self.w*loss
+    
+    def get_flops(self, input):
+         
+        print("Flops not implemented for Channel_constraint, hyper_net.resource_output(): \n", input)
+        return 0
 
 class Flops_constraint_densenet(nn.Module):
     def __init__(self, p, kernel_size, out_size, group_size, size_inchannel, size_outchannel, in_channel=3, w=10, HN=False, structure=None):
@@ -1187,6 +1192,52 @@ def get_middle_Fsize_resnetbb(model, input_res=224, num_gates=2):
 
     return size_out, size_kernel, size_group, size_inchannel, size_outchannel
 
+def get_middle_Fsize_vae(model, input_res=128, num_gates=1):
+    size_out = []
+    size_kernel = []
+    size_group = []
+    size_inchannel = []
+    size_outchannel = []
+
+    def conv_hook(self, input, output):
+        batch_size, input_channels, input_height, input_width = input[0].size()
+        output_channels, output_height, output_width = output[0].size()
+        size_out.append(output_height * output_width)
+        size_kernel.append(self.kernel_size[0] * self.kernel_size[1])
+        size_group.append(self.groups)
+        size_inchannel.append(input_channels)
+        size_outchannel.append(output_channels)
+
+    def foo(net):
+        modules = list(net.modules())
+        #print(modules)
+        soft_gate_count=0
+        for layer_id in range(len(modules)):
+            m = modules[layer_id]
+            #print(m)
+            #if layer_id + 3 <= len(modules):
+            if isinstance(m, virtual_gate):
+                if num_gates==2:
+                    modules[layer_id - 2].register_forward_hook(conv_hook)
+                    if soft_gate_count%2 == 1:
+
+                        modules[layer_id + 1].register_forward_hook(conv_hook) # ???
+                    soft_gate_count += 1
+                else:
+                    modules[layer_id - 4].register_forward_hook(conv_hook)
+                    modules[layer_id - 2].register_forward_hook(conv_hook)
+                    modules[layer_id + 1].register_forward_hook(conv_hook)
+
+
+    foo(model)
+    input = torch.rand(2, 3, input_res, input_res)
+    input.require_grad = True
+    out = model(input)
+    print(len(size_out))
+    print(len(size_kernel))
+
+    return size_out, size_kernel, size_group, size_inchannel, size_outchannel
+
 def get_middle_Fsize_densenet(model, input_res=224):
     size_out = []
     size_kernel = []
@@ -1556,10 +1607,10 @@ def group_weight(module, wegith_norm=True):
                 group_no_decay.append(m.weight)
             if m.bias is not None:
                 group_no_decay.append(m.bias)
-    print(len(list(module.parameters())))
-    print(len(group_decay))
-    print(len(group_no_decay))
-    print(count)
+    print("len(list(module.parameters()))" ,len(list(module.parameters())))
+    print("len(group_decay)" ,len(group_decay))
+    print("len(group_no_decay)", len(group_no_decay))
+    print("count:",count)
     #print(module)
     assert len(list(module.parameters()))-count == len(group_decay) + len(group_no_decay)
     groups = [dict(params=group_decay), dict(params=group_no_decay, weight_decay=.0)]
